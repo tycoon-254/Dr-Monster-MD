@@ -1,6 +1,8 @@
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from "@whiskeysockets/baileys";
+import makeWASocket, { 
+    useMultiFileAuthState, 
+    fetchLatestBaileysVersion 
+} from "@whiskeysockets/baileys";
 import P from "pino";
-import qrcode from "qrcode-terminal";
 import express from "express";
 
 const app = express();
@@ -9,45 +11,34 @@ app.listen(process.env.PORT || 3000);
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("session");
+    const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
         logger: P({ level: "silent" }),
-        auth: state
+        auth: state,
+        version
     });
 
     sock.ev.on("creds.update", saveCreds);
 
-    sock.ev.on("connection.update", (update) => {
-        const { connection, qr } = update;
+    sock.ev.on("connection.update", async (update) => {
+        const { connection } = update;
 
-        if (qr) {
-            console.log("Scan this QR:");
-            qrcode.generate(qr, { small: true });
+        if (connection === "open") {
+            console.log("Dr.Monster Connected 👑");
         }
 
         if (connection === "close") {
+            console.log("Reconnecting...");
             startBot();
-        } else if (connection === "open") {
-            console.log("Dr.Monster Connected 👑");
         }
     });
 
-    sock.ev.on("messages.upsert", async ({ messages }) => {
-        const msg = messages[0];
-        if (!msg.message) return;
+    // 🔥 Pairing Code System
+    if (!sock.authState.creds.registered) {
+        const phoneNumber = process.env.NUMBER; // number from Render env
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log("Your Pairing Code:", code);
+    }
 
-        const text = msg.message.conversation;
-
-        if (text === ".menu") {
-            await sock.sendMessage(msg.key.remoteJid, {
-                text: "😈 Dr.Monster Bot Online\n\nCommands:\n.menu\n.ping"
-            });
-        }
-
-        if (text === ".ping") {
-            await sock.sendMessage(msg.key.remoteJid, { text: "Pong 🧠🔥" });
-        }
-    });
-}
-
-startBot();
+    sock.ev.on("messages.upsert", async ({ messages }) =>
